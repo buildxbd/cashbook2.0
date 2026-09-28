@@ -1,0 +1,185 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  FINANCE_MANAGER
+  DATA_OPERATOR
+  VIEWER
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum PaymentMode {
+  CASH
+  VIRTUAL_UPI
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum WalletStatus {
+  ACTIVE
+  FROZEN
+  SUSPENDED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  phone     String?  @unique
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownedBusinesses Business[]       @relation("BusinessOwner")
+  businessMembers BusinessMember[]
+  transactions    Transaction[]    @relation("UserTransactions")
+  auditLogs       AuditLog[]       @relation("UserAuditLogs")
+
+  @@map("users")
+}
+
+model Business {
+  id        String   @id @default(cuid())
+  name      String
+  legalName String?
+  gstin     String?  @unique
+  pan       String?
+  currency  String   @default("INR")
+  ownerId   String
+  owner     User     @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members BusinessMember[]
+  books   Book[]
+  wallets VirtualWallet[]
+
+  @@map("businesses")
+}
+
+model BusinessMember {
+  id         String   @id @default(cuid())
+  userId     String
+  businessId String
+  role       Role     @default(VIEWER)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, businessId])
+  @@index([businessId])
+  @@map("business_members")
+}
+
+model Book {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions Transaction[]
+
+  @@index([businessId])
+  @@map("books")
+}
+
+model VirtualWallet {
+  id           String       @id @default(cuid())
+  businessId   String
+  business     Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  upiVpa       String?      @unique
+  balance      Decimal      @default(0.0) @db.Decimal(14, 2)
+  dailyLimit   Decimal      @default(50000.0) @db.Decimal(14, 2)
+  monthlyLimit Decimal      @default(1000000.0) @db.Decimal(14, 2)
+  dailySpent   Decimal      @default(0.0) @db.Decimal(14, 2)
+  monthlySpent Decimal      @default(0.0) @db.Decimal(14, 2)
+  status       WalletStatus @default(ACTIVE)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  transactions Transaction[]
+
+  @@index([businessId])
+  @@map("virtual_wallets")
+}
+
+model Transaction {
+  id          String            @id @default(cuid())
+  bookId      String
+  book        Book              @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  type        TransactionType
+  paymentMode PaymentMode
+  amount      Decimal           @db.Decimal(14, 2)
+  category    String
+  note        String?
+  voucherUrl  String?
+  locationGeo String?
+  isLocked    Boolean           @default(false)
+  status      TransactionStatus @default(COMPLETED)
+
+  walletId String?
+  wallet   VirtualWallet? @relation(fields: [walletId], references: [id], onDelete: SetNull)
+
+  upiRefNumber String?
+  payerVpa     String?
+  payeeVpa     String?
+
+  createdById String
+  createdBy   User   @relation("UserTransactions", fields: [createdById], references: [id], onDelete: Restrict)
+
+  transactionDate DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  auditLogs AuditLog[]
+
+  @@index([bookId])
+  @@index([walletId])
+  @@index([createdById])
+  @@index([transactionDate])
+  @@map("transactions")
+}
+
+model AuditLog {
+  id            String       @id @default(cuid())
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  entityType    String       @default("TRANSACTION")
+  entityId      String
+  action        String
+  oldValues     Json?
+  newValues     Json?
+  performedById String?
+  performedBy   User?        @relation("UserAuditLogs", fields: [performedById], references: [id], onDelete: SetNull)
+  ipAddress     String?
+  userAgent     String?
+  immutableHash String?
+  createdAt     DateTime     @default(now())
+
+  @@index([transactionId])
+  @@index([entityId])
+  @@index([performedById])
+  @@map("audit_logs")
+}
