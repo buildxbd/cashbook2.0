@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { PaymentMode, TransactionType, Role } from '@prisma/client';
 import { getTransactionLockInfo, canAddTransaction } from '@/lib/auth/permissions';
+import { TransactionListSkeleton } from '@/components/ui/Skeleton';
 
 export interface TransactionRecord {
   id: string;
@@ -111,9 +112,11 @@ export function TransactionList({
 
   if (isLoading) {
     return (
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
-        <div className="w-10 h-10 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin mx-auto" />
-        <p className="text-sm text-slate-400">Loading ledger transactions...</p>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+        <div className="px-5 py-3.5 border-b border-slate-800/80 bg-slate-950/40 text-xs font-semibold text-slate-400">
+          Loading entries from ledger...
+        </div>
+        <TransactionListSkeleton />
       </div>
     );
   }

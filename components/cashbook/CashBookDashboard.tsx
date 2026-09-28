@@ -14,7 +14,9 @@ import { PrintReceiptSlip } from './PrintReceiptSlip';
 import { ReportsExportView } from './ReportsExportView';
 import { NetworkBanner, PendingQueueBadge } from '@/components/ui/NetworkBanner';
 import { PWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
+import { BalanceSummaryHeaderSkeleton } from '@/components/ui/Skeleton';
 import { syncEngine } from '@/lib/offline/sync-engine';
+import { toast } from 'sonner';
 import { BalanceSummary } from '@/lib/services/ledger-service';
 import { PaymentMode, TransactionType, Role } from '@prisma/client';
 import { DEMO_USERS, UserSession } from '@/lib/auth/permissions';
@@ -212,6 +214,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
         transactionCount: prev.transactionCount + 1,
       }));
 
+      toast.info('Saved locally in offline queue. Auto-sync will run when online.');
       setActionAlert({
         message: '🔴 Offline Mode: Transaction saved locally in IndexedDB and will auto-sync when reconnected.',
         type: 'success',
@@ -233,9 +236,13 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
 
       const data = await res.json();
       if (!data.success) {
+        toast.error(data.error || 'Failed to record transaction');
         throw new Error(data.error || 'Failed to record transaction');
       }
 
+      toast.success(
+        txData.type === 'INCOME' ? 'Cash In recorded successfully!' : 'Cash Out recorded successfully!'
+      );
       setActionAlert({ message: 'Transaction recorded and added to audit trail.', type: 'success' });
       setTimeout(() => setActionAlert(null), 4000);
       await loadTransactions();
@@ -247,6 +254,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
           bookId: selectedBookId,
           performedBy: currentUser,
         });
+        toast.info('Network dropped. Transaction queued locally for auto-sync.');
         setActionAlert({
           message: 'Connection dropped. Transaction queued locally for auto-sync.',
           type: 'success',
@@ -278,9 +286,11 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
 
     const data = await res.json();
     if (!data.success) {
+      toast.error(data.error || 'Failed to update transaction');
       throw new Error(data.error || 'Failed to update transaction');
     }
 
+    toast.success(`Transaction #${updatedData.id.slice(-6)} updated successfully`);
     setActionAlert({ message: `Transaction #${updatedData.id.slice(-6)} updated successfully.`, type: 'success' });
     setTimeout(() => setActionAlert(null), 4000);
     await loadTransactions();
@@ -301,10 +311,12 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
 
     const data = await res.json();
     if (!data.success) {
+      toast.error(data.error || 'Failed to delete transaction');
       alert(data.error || 'Failed to delete transaction');
       return;
     }
 
+    toast.success(`Transaction #${id.slice(-6)} deleted & recorded to audit trail`);
     setActionAlert({ message: `Transaction #${id.slice(-6)} deleted and recorded to immutable audit log.`, type: 'success' });
     setTimeout(() => setActionAlert(null), 4000);
     await loadTransactions();
@@ -416,15 +428,15 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
       <NetworkBanner />
 
       {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-md border-b border-slate-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
-              <Layers className="w-5 h-5" />
+      <header className="sticky top-0 z-30 bg-slate-950/90 backdrop-blur-md border-b border-slate-800">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-0 sm:h-16 flex flex-wrap sm:flex-nowrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 shrink-0">
+              <Layers className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-base tracking-tight text-white">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className="font-extrabold text-sm sm:text-base tracking-tight text-white">
                   CashBook <span className="text-emerald-400">2.0</span>
                 </span>
                 <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -432,14 +444,14 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
                 </span>
                 <PendingQueueBadge />
               </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
+              <p className="text-[10px] sm:text-[11px] text-slate-400 hidden sm:block">
                 Multi-Ledger CashBook & UPI/MFS Native Expense Platform
               </p>
             </div>
           </div>
 
           {/* Right Header Navigation & Actions */}
-          <div className="flex items-center gap-2 sm:gap-2.5">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* Vouchers Gallery Button */}
             <button
               onClick={() => setIsVoucherGalleryOpen(true)}
@@ -566,12 +578,16 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
         {activeTab === 'LEDGER' ? (
           <>
             {/* Real-time Balance Summary & Action Buttons */}
-            <BalanceSummaryHeader
-              summary={summary}
-              onOpenAddModal={handleOpenAddModal}
-              currentUserRole={currentUser.role}
-              currency="BDT"
-            />
+            {isLoadingTransactions ? (
+              <BalanceSummaryHeaderSkeleton />
+            ) : (
+              <BalanceSummaryHeader
+                summary={summary}
+                onOpenAddModal={handleOpenAddModal}
+                currentUserRole={currentUser.role}
+                currency="BDT"
+              />
+            )}
 
             {/* Filter & Search Bar */}
             <FilterBar

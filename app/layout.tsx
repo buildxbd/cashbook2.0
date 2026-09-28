@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import localFont from 'next/font/local';
+import { Toaster } from 'sonner';
 import './globals.css';
 
 const geistSans = localFont({
@@ -50,6 +51,7 @@ export default function RootLayout({
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-100`}>
         {children}
+        <Toaster position="top-right" richColors theme="dark" closeButton />
 
         {/* PWA Service Worker Registration */}
         <script
