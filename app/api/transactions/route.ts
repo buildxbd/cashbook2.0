@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { LedgerService } from '@/lib/services/ledger-service';
-import { PaymentMode, TransactionType } from '@prisma/client';
+import { PaymentMode, TransactionType, Role } from '@prisma/client';
+import { canAddTransaction } from '@/lib/auth/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,7 +58,19 @@ export async function POST(req: NextRequest) {
       voucherUrl,
       locationGeo,
       transactionDate,
+      performedBy = { id: 'usr_owner_01', name: 'Tanvir Hossain', role: 'OWNER' as Role },
     } = body;
+
+    // RBAC check: Can user add transactions?
+    if (!canAddTransaction(performedBy.role)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Role "${performedBy.role}" has read-only access and cannot record transactions.`,
+        },
+        { status: 403 }
+      );
+    }
 
     if (!bookId) {
       return NextResponse.json(
@@ -88,7 +101,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Call service which enforces MockPaymentAdapter wallet checks for VIRTUAL_WALLET
     const newTransaction = await LedgerService.createTransaction({
       bookId,
       type: type as TransactionType,
@@ -99,6 +111,7 @@ export async function POST(req: NextRequest) {
       voucherUrl: voucherUrl?.trim(),
       locationGeo: locationGeo?.trim(),
       transactionDate,
+      performedBy,
     });
 
     return NextResponse.json(
@@ -116,6 +129,90 @@ export async function POST(req: NextRequest) {
         error: (error as Error).message || 'Failed to create transaction',
       },
       { status: 400 }
+    );
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      id,
+      amount,
+      category,
+      note,
+      voucherUrl,
+      locationGeo,
+      paymentMode,
+      isLocked,
+      performedBy = { id: 'usr_owner_01', name: 'Tanvir Hossain', role: 'OWNER' as Role },
+    } = body;
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Transaction ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const updated = await LedgerService.updateTransaction({
+      id,
+      amount: amount !== undefined ? Number(amount) : undefined,
+      category,
+      note,
+      voucherUrl,
+      locationGeo,
+      paymentMode,
+      isLocked,
+      performedBy,
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: updated,
+      message: 'Transaction updated successfully',
+    });
+  } catch (error) {
+    const msg = (error as Error).message;
+    const isPermissionError = msg.includes('locked') || msg.includes('permission') || msg.includes('Expired');
+    return NextResponse.json(
+      { success: false, error: msg },
+      { status: isPermissionError ? 403 : 400 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    const role = (searchParams.get('role') || 'OWNER') as Role;
+    const userId = searchParams.get('userId') || 'usr_owner_01';
+    const userName = searchParams.get('userName') || 'Tanvir Hossain';
+
+    if (!id) {
+      return NextResponse.json(
+        { success: false, error: 'Transaction ID parameter is required' },
+        { status: 400 }
+      );
+    }
+
+    const res = await LedgerService.deleteTransaction(id, {
+      id: userId,
+      name: userName,
+      role,
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: res.message,
+    });
+  } catch (error) {
+    const msg = (error as Error).message;
+    const isPermissionError = msg.includes('locked') || msg.includes('permission') || msg.includes('Expired');
+    return NextResponse.json(
+      { success: false, error: msg },
+      { status: isPermissionError ? 403 : 400 }
     );
   }
 }

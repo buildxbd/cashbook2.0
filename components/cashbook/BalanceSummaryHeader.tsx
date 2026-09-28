@@ -12,18 +12,24 @@ import {
 } from 'lucide-react';
 import { BalanceSummary } from '@/lib/services/ledger-service';
 
+import { Role } from '@prisma/client';
+import { canAddTransaction } from '@/lib/auth/permissions';
+
 interface BalanceSummaryHeaderProps {
   summary: BalanceSummary;
   onOpenAddModal: (defaultType: 'INCOME' | 'EXPENSE') => void;
+  currentUserRole?: Role;
   currency?: string;
 }
 
 export function BalanceSummaryHeader({
   summary,
   onOpenAddModal,
+  currentUserRole = 'OWNER',
   currency = 'BDT',
 }: BalanceSummaryHeaderProps) {
   const isNetPositive = summary.netBalance >= 0;
+  const isAuthorizedToAdd = canAddTransaction(currentUserRole);
   const dailySpentPercent = Math.min(
     100,
     Math.round((summary.dailySpent / (summary.dailyLimit || 1)) * 100)
@@ -51,22 +57,28 @@ export function BalanceSummaryHeader({
         </div>
 
         {/* Primary Action Buttons */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          <button
-            onClick={() => onOpenAddModal('INCOME')}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-emerald-600/25 transition-all transform hover:-translate-y-0.5"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Cash In (+IN)</span>
-          </button>
-          <button
-            onClick={() => onOpenAddModal('EXPENSE')}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-rose-600/25 transition-all transform hover:-translate-y-0.5"
-          >
-            <Minus className="w-4 h-4" />
-            <span>Cash Out (-OUT)</span>
-          </button>
-        </div>
+        {isAuthorizedToAdd ? (
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <button
+              onClick={() => onOpenAddModal('INCOME')}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-emerald-600/25 transition-all transform hover:-translate-y-0.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Cash In (+IN)</span>
+            </button>
+            <button
+              onClick={() => onOpenAddModal('EXPENSE')}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-rose-600/25 transition-all transform hover:-translate-y-0.5"
+            >
+              <Minus className="w-4 h-4" />
+              <span>Cash Out (-OUT)</span>
+            </button>
+          </div>
+        ) : (
+          <div className="px-3.5 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-xs text-slate-400 italic">
+            Read-only mode (Role: {currentUserRole})
+          </div>
+        )}
       </div>
 
       {/* 3 Metrics Cards */}

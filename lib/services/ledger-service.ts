@@ -1,6 +1,12 @@
 import { prisma } from '@/lib/prisma';
 import { mockPaymentAdapter } from '@/lib/payment/mock-adapter';
-import { PaymentMode, TransactionType } from '@prisma/client';
+import { PaymentMode, TransactionType, Role } from '@prisma/client';
+import {
+  canEditTransaction,
+  canDeleteTransaction,
+  isTransactionLockedByAge,
+  canManageStaff,
+} from '@/lib/auth/permissions';
 
 export interface LedgerBook {
   id: string;
@@ -38,6 +44,32 @@ export interface LedgerTransaction {
   runningBalance?: number;
 }
 
+export interface StaffMember {
+  id: string;
+  userId: string;
+  businessId: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  role: Role;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AuditLogItem {
+  id: string;
+  transactionId?: string | null;
+  entityType: string;
+  entityId: string;
+  action: 'CREATE' | 'UPDATE' | 'DELETE' | 'ROLE_CHANGE' | 'LOCK_OVERRIDE';
+  oldValues?: Record<string, unknown> | null;
+  newValues?: Record<string, unknown> | null;
+  performedById?: string | null;
+  performedByName?: string | null;
+  performedByRole?: string | null;
+  createdAt: Date | string;
+}
+
 export interface TransactionFilterOptions {
   bookId?: string;
   type?: 'ALL' | TransactionType;
@@ -63,6 +95,27 @@ export interface CreateTransactionInput {
   walletId?: string;
   payerVpa?: string;
   payeeVpa?: string;
+  performedBy?: {
+    id: string;
+    name: string;
+    role: Role;
+  };
+}
+
+export interface UpdateTransactionInput {
+  id: string;
+  amount?: number;
+  category?: string;
+  note?: string;
+  voucherUrl?: string;
+  locationGeo?: string;
+  paymentMode?: PaymentMode;
+  isLocked?: boolean;
+  performedBy: {
+    id: string;
+    name: string;
+    role: Role;
+  };
 }
 
 export interface BalanceSummary {
@@ -75,7 +128,7 @@ export interface BalanceSummary {
   dailyLimit: number;
 }
 
-// In-Memory fallback store for environments without a live PostgreSQL connection (e.g., Cloudflare Pages edge / local testing)
+// In-Memory store for mock fallback and Cloudflare Pages compatibility
 const mockStore = {
   business: {
     id: 'biz_default_01',
@@ -83,7 +136,7 @@ const mockStore = {
     legalName: 'BuildX Technologies Limited',
     gstin: 'BIN-192837465',
     currency: 'BDT',
-    ownerId: 'usr_default_01',
+    ownerId: 'usr_owner_01',
     createdAt: new Date(),
     updatedAt: new Date(),
   },
@@ -129,6 +182,52 @@ const mockStore = {
       updatedAt: new Date(),
     },
   ] as LedgerBook[],
+  members: [
+    {
+      id: 'mem_01',
+      userId: 'usr_owner_01',
+      businessId: 'biz_default_01',
+      role: 'OWNER' as Role,
+      name: 'Tanvir Hossain',
+      email: 'tanvir@buildx.bd',
+      phone: '+8801711000001',
+      createdAt: new Date(Date.now() - 60 * 86400000),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'mem_02',
+      userId: 'usr_finance_02',
+      businessId: 'biz_default_01',
+      role: 'FINANCE_MANAGER' as Role,
+      name: 'Farhana Ahmed',
+      email: 'farhana.fin@buildx.bd',
+      phone: '+8801711000002',
+      createdAt: new Date(Date.now() - 40 * 86400000),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'mem_03',
+      userId: 'usr_operator_03',
+      businessId: 'biz_default_01',
+      role: 'DATA_OPERATOR' as Role,
+      name: 'Karim Uddin',
+      email: 'karim.op@buildx.bd',
+      phone: '+8801711000003',
+      createdAt: new Date(Date.now() - 20 * 86400000),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'mem_04',
+      userId: 'usr_viewer_04',
+      businessId: 'biz_default_01',
+      role: 'VIEWER' as Role,
+      name: 'Ayesha Siddiqua',
+      email: 'ayesha.auditor@buildx.bd',
+      phone: '+8801711000004',
+      createdAt: new Date(Date.now() - 10 * 86400000),
+      updatedAt: new Date(),
+    },
+  ] as StaffMember[],
   transactions: [
     {
       id: 'tx_init_01',
@@ -146,9 +245,9 @@ const mockStore = {
       upiRefNumber: '426810293847',
       payerVpa: 'client.corp@bank',
       payeeVpa: 'buildx@bank',
-      createdById: 'usr_default_01',
+      createdById: 'usr_owner_01',
       transactionDate: new Date(Date.now() - 5 * 86400000),
-      createdAt: new Date(Date.now() - 5 * 86400000),
+      createdAt: new Date(Date.now() - 5 * 86400000), // > 24h old (Auto-Locked)
       updatedAt: new Date(Date.now() - 5 * 86400000),
     },
     {
@@ -161,15 +260,15 @@ const mockStore = {
       note: 'Monthly Cloudflare Pages and Database Hosting renewal',
       voucherUrl: 'https://images.unsplash.com/photo-1450133064473-71024230f91b?w=600&auto=format&fit=crop&q=80',
       locationGeo: '23.8103,90.4125',
-      isLocked: false,
+      isLocked: true,
       status: 'COMPLETED',
       walletId: 'wal_default_01',
       upiRefNumber: '426899128374',
       payerVpa: 'buildx.corp@bkash',
       payeeVpa: 'cloudflare@merch',
-      createdById: 'usr_default_01',
+      createdById: 'usr_finance_02',
       transactionDate: new Date(Date.now() - 3 * 86400000),
-      createdAt: new Date(Date.now() - 3 * 86400000),
+      createdAt: new Date(Date.now() - 3 * 86400000), // > 24h old
       updatedAt: new Date(Date.now() - 3 * 86400000),
     },
     {
@@ -188,10 +287,10 @@ const mockStore = {
       upiRefNumber: null,
       payerVpa: null,
       payeeVpa: null,
-      createdById: 'usr_default_01',
-      transactionDate: new Date(Date.now() - 1 * 86400000),
-      createdAt: new Date(Date.now() - 1 * 86400000),
-      updatedAt: new Date(Date.now() - 1 * 86400000),
+      createdById: 'usr_operator_03',
+      transactionDate: new Date(Date.now() - 2 * 3600000), // 2 hours old! Within 24h window
+      createdAt: new Date(Date.now() - 2 * 3600000),
+      updatedAt: new Date(Date.now() - 2 * 3600000),
     },
     {
       id: 'tx_init_04',
@@ -209,7 +308,7 @@ const mockStore = {
       upiRefNumber: '426855123490',
       payerVpa: null,
       payeeVpa: null,
-      createdById: 'usr_default_01',
+      createdById: 'usr_owner_01',
       transactionDate: new Date(Date.now() - 10 * 86400000),
       createdAt: new Date(Date.now() - 10 * 86400000),
       updatedAt: new Date(Date.now() - 10 * 86400000),
@@ -230,13 +329,50 @@ const mockStore = {
       upiRefNumber: null,
       payerVpa: null,
       payeeVpa: null,
-      createdById: 'usr_default_01',
+      createdById: 'usr_operator_03',
       transactionDate: new Date(Date.now() - 4 * 86400000),
       createdAt: new Date(Date.now() - 4 * 86400000),
       updatedAt: new Date(Date.now() - 4 * 86400000),
     },
   ] as LedgerTransaction[],
-  auditLogs: [] as Array<Record<string, unknown>>,
+  auditLogs: [
+    {
+      id: 'aud_01',
+      transactionId: 'tx_init_01',
+      entityType: 'TRANSACTION',
+      entityId: 'tx_init_01',
+      action: 'CREATE',
+      newValues: { amount: 150000, type: 'INCOME', category: 'Client Retainer' },
+      performedById: 'usr_owner_01',
+      performedByName: 'Tanvir Hossain',
+      performedByRole: 'OWNER',
+      createdAt: new Date(Date.now() - 5 * 86400000),
+    },
+    {
+      id: 'aud_02',
+      transactionId: 'tx_init_02',
+      entityType: 'TRANSACTION',
+      entityId: 'tx_init_02',
+      action: 'CREATE',
+      newValues: { amount: 12500, type: 'EXPENSE', category: 'Cloud Infrastructure' },
+      performedById: 'usr_finance_02',
+      performedByName: 'Farhana Ahmed',
+      performedByRole: 'FINANCE_MANAGER',
+      createdAt: new Date(Date.now() - 3 * 86400000),
+    },
+    {
+      id: 'aud_03',
+      transactionId: 'tx_init_03',
+      entityType: 'TRANSACTION',
+      entityId: 'tx_init_03',
+      action: 'CREATE',
+      newValues: { amount: 3200, type: 'EXPENSE', category: 'Office Supply' },
+      performedById: 'usr_operator_03',
+      performedByName: 'Karim Uddin',
+      performedByRole: 'DATA_OPERATOR',
+      createdAt: new Date(Date.now() - 2 * 3600000),
+    },
+  ] as AuditLogItem[],
 };
 
 export class LedgerService {
@@ -262,10 +398,9 @@ export class LedgerService {
         return books;
       }
     } catch (error) {
-      console.warn('[LedgerService] Database query failed or unavailable, using in-memory store:', (error as Error).message);
+      console.warn('[LedgerService] Database query fallback:', (error as Error).message);
     }
 
-    // Fallback to in-memory store
     return mockStore.books.map((b) => ({
       ...b,
       _count: {
@@ -289,8 +424,8 @@ export class LedgerService {
         },
       });
       return newBook;
-    } catch (error) {
-      console.warn('[LedgerService] Prisma book creation failed, using mock store:', (error as Error).message);
+    } catch {
+      // Fallback to mock store
     }
 
     const newBook: LedgerBook = {
@@ -328,7 +463,7 @@ export class LedgerService {
         };
       }
     } catch {
-      // Fall through to mock store
+      // fallback
     }
 
     return mockStore.wallet;
@@ -383,7 +518,6 @@ export class LedgerService {
         txList = [];
       }
     } catch {
-      // Filter mock store
       txList = mockStore.transactions.filter((t) => {
         if (bookId && t.bookId !== bookId) return false;
         if (type && type !== 'ALL' && t.type !== type) return false;
@@ -401,8 +535,16 @@ export class LedgerService {
       });
     }
 
-    // Sort ascending to calculate running balance, then reverse for display
-    const chronological = [...txList].sort(
+    // Process 24-hour auto lock flag
+    const processedTxList = txList.map((t) => {
+      const isAgeLocked = isTransactionLockedByAge(t.createdAt || t.transactionDate);
+      return {
+        ...t,
+        isLocked: t.isLocked || isAgeLocked,
+      };
+    });
+
+    const chronological = [...processedTxList].sort(
       (a, b) => new Date(a.transactionDate).getTime() - new Date(b.transactionDate).getTime()
     );
 
@@ -420,7 +562,6 @@ export class LedgerService {
       };
     });
 
-    // Display order: newest first
     return withRunningBalance.reverse();
   }
 
@@ -468,6 +609,7 @@ export class LedgerService {
       voucherUrl = '',
       locationGeo = '',
       transactionDate = new Date().toISOString(),
+      performedBy = { id: 'usr_owner_01', name: 'Tanvir Hossain', role: 'OWNER' as Role },
     } = input;
 
     if (!amount || amount <= 0) {
@@ -477,7 +619,6 @@ export class LedgerService {
     const wallet = await this.getWallet();
     let upiRefNumber: string | null = null;
 
-    // INTEGRATION WITH MockPaymentAdapter FOR VIRTUAL_WALLET
     if (paymentMode === 'VIRTUAL_WALLET' || paymentMode === 'VIRTUAL_UPI') {
       const validation = mockPaymentAdapter.verifyWalletBalanceAndLimits({
         walletId: wallet.id,
@@ -494,12 +635,10 @@ export class LedgerService {
         throw new Error(validation.reason ?? 'Virtual Wallet validation failed');
       }
 
-      // Update mock wallet state
       mockStore.wallet.balance = validation.newBalance;
       mockStore.wallet.dailySpent = validation.newDailySpent;
       mockStore.wallet.monthlySpent = validation.newMonthlySpent;
 
-      // Generate simulated UPI RRN
       const mockPay = await mockPaymentAdapter.initiatePayment({
         amount,
         payeeVpa: 'merchant@bkash',
@@ -524,13 +663,12 @@ export class LedgerService {
           voucherUrl,
           locationGeo,
           upiRefNumber,
-          createdById: 'usr_default_01',
+          createdById: performedBy.id,
           transactionDate: txDateObj,
           walletId: paymentMode === 'VIRTUAL_WALLET' || paymentMode === 'VIRTUAL_UPI' ? wallet.id : null,
         },
       });
 
-      // Create Audit Log
       await prisma.auditLog.create({
         data: {
           transactionId: dbTx.id,
@@ -545,7 +683,7 @@ export class LedgerService {
             note,
             bookId,
           },
-          performedById: 'usr_default_01',
+          performedById: performedBy.id,
         },
       });
 
@@ -553,11 +691,10 @@ export class LedgerService {
         ...dbTx,
         amount: Number(dbTx.amount),
       };
-    } catch (err) {
-      console.warn('[LedgerService] Prisma transaction create failed, using mock store:', (err as Error).message);
+    } catch {
+      // Fallback
     }
 
-    // Save to mock store
     const mockTx: LedgerTransaction = {
       id: newTxId,
       bookId,
@@ -574,7 +711,7 @@ export class LedgerService {
       upiRefNumber,
       payerVpa: wallet.upiVpa,
       payeeVpa: null,
-      createdById: 'usr_default_01',
+      createdById: performedBy.id,
       transactionDate: txDateObj,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -583,15 +720,297 @@ export class LedgerService {
 
     mockStore.transactions.unshift(mockTx);
 
-    // Append to mock audit logs
-    mockStore.auditLogs.push({
-      id: `audit_${Date.now()}`,
+    mockStore.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
       transactionId: newTxId,
+      entityType: 'TRANSACTION',
+      entityId: newTxId,
       action: 'CREATE',
-      timestamp: new Date().toISOString(),
-      details: { amount, type, paymentMode, category },
+      newValues: { amount, type, paymentMode, category, note },
+      performedById: performedBy.id,
+      performedByName: performedBy.name,
+      performedByRole: performedBy.role,
+      createdAt: new Date(),
     });
 
     return mockTx;
+  }
+
+  /**
+   * Update an existing transaction with strict 24-hour RBAC lock checks and audit logging
+   */
+  static async updateTransaction(input: UpdateTransactionInput): Promise<LedgerTransaction> {
+    const { id, amount, category, note, voucherUrl, locationGeo, paymentMode, isLocked, performedBy } =
+      input;
+
+    // Find existing transaction
+    const existing = mockStore.transactions.find((t) => t.id === id);
+    if (!existing) {
+      throw new Error(`Transaction with ID "${id}" not found.`);
+    }
+
+    // RBAC & 24h Lock Permission Check
+    const check = canEditTransaction(
+      performedBy.role,
+      {
+        createdAt: existing.createdAt || existing.transactionDate,
+        isLocked: existing.isLocked,
+        createdById: existing.createdById,
+      },
+      performedBy.id
+    );
+
+    if (!check.allowed) {
+      throw new Error(check.reason || 'You do not have permission to edit this transaction.');
+    }
+
+    const oldSnapshot = { ...existing };
+
+    if (amount !== undefined && amount > 0) {
+      existing.amount = amount;
+    }
+    if (category) existing.category = category;
+    if (note !== undefined) existing.note = note;
+    if (voucherUrl !== undefined) existing.voucherUrl = voucherUrl;
+    if (locationGeo !== undefined) existing.locationGeo = locationGeo;
+    if (paymentMode) existing.paymentMode = paymentMode;
+    if (isLocked !== undefined) existing.isLocked = isLocked;
+    existing.updatedAt = new Date();
+
+    const newSnapshot = { ...existing };
+
+    // Record Immutable Audit Log
+    mockStore.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      transactionId: id,
+      entityType: 'TRANSACTION',
+      entityId: id,
+      action: 'UPDATE',
+      oldValues: oldSnapshot as unknown as Record<string, unknown>,
+      newValues: newSnapshot as unknown as Record<string, unknown>,
+      performedById: performedBy.id,
+      performedByName: performedBy.name,
+      performedByRole: performedBy.role,
+      createdAt: new Date(),
+    });
+
+    try {
+      await prisma.transaction.update({
+        where: { id },
+        data: {
+          ...(amount ? { amount } : {}),
+          ...(category ? { category } : {}),
+          ...(note !== undefined ? { note } : {}),
+          ...(voucherUrl !== undefined ? { voucherUrl } : {}),
+          ...(isLocked !== undefined ? { isLocked } : {}),
+        },
+      });
+    } catch {
+      // Prisma fallback
+    }
+
+    return existing;
+  }
+
+  /**
+   * Delete a transaction with RBAC & 24h lock enforcement and audit logging
+   */
+  static async deleteTransaction(
+    id: string,
+    performedBy: { id: string; name: string; role: Role }
+  ): Promise<{ success: boolean; message: string }> {
+    const existingIndex = mockStore.transactions.findIndex((t) => t.id === id);
+    if (existingIndex === -1) {
+      throw new Error(`Transaction with ID "${id}" not found.`);
+    }
+
+    const existing = mockStore.transactions[existingIndex];
+
+    // RBAC & 24h Lock Permission Check
+    const check = canDeleteTransaction(
+      performedBy.role,
+      {
+        createdAt: existing.createdAt || existing.transactionDate,
+        isLocked: existing.isLocked,
+        createdById: existing.createdById,
+      },
+      performedBy.id
+    );
+
+    if (!check.allowed) {
+      throw new Error(check.reason || 'You do not have permission to delete this transaction.');
+    }
+
+    const [deletedTx] = mockStore.transactions.splice(existingIndex, 1);
+
+    // Record Immutable Audit Log
+    mockStore.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      transactionId: id,
+      entityType: 'TRANSACTION',
+      entityId: id,
+      action: 'DELETE',
+      oldValues: deletedTx as unknown as Record<string, unknown>,
+      newValues: null,
+      performedById: performedBy.id,
+      performedByName: performedBy.name,
+      performedByRole: performedBy.role,
+      createdAt: new Date(),
+    });
+
+    try {
+      await prisma.transaction.delete({ where: { id } });
+    } catch {
+      // Prisma fallback
+    }
+
+    return {
+      success: true,
+      message: `Transaction ${id} deleted and recorded to immutable audit log.`,
+    };
+  }
+
+  /**
+   * Fetch all staff members for the business
+   */
+  static async getMembers(businessId?: string): Promise<StaffMember[]> {
+    if (businessId) {
+      return mockStore.members.filter((m) => m.businessId === businessId);
+    }
+    return mockStore.members;
+  }
+
+  /**
+   * Add / invite a new staff member to the business with an assigned role
+   */
+  static async addMember(input: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: Role;
+    performedBy: { id: string; name: string; role: Role };
+  }): Promise<StaffMember> {
+    const { name, email, phone, role, performedBy } = input;
+
+    if (!canManageStaff(performedBy.role, role)) {
+      throw new Error(`Your role (${performedBy.role}) cannot assign or invite a member with role "${role}".`);
+    }
+
+    const existing = mockStore.members.find((m) => m.email.toLowerCase() === email.toLowerCase());
+    if (existing) {
+      throw new Error(`A member with email "${email}" already exists.`);
+    }
+
+    const newMember: StaffMember = {
+      id: `mem_${Date.now()}`,
+      userId: `usr_${Date.now()}`,
+      businessId: mockStore.business.id,
+      name,
+      email: email.toLowerCase(),
+      phone: phone || null,
+      role,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    mockStore.members.push(newMember);
+
+    mockStore.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      entityType: 'BUSINESS_MEMBER',
+      entityId: newMember.id,
+      action: 'ROLE_CHANGE',
+      newValues: { name, email, role },
+      performedById: performedBy.id,
+      performedByName: performedBy.name,
+      performedByRole: performedBy.role,
+      createdAt: new Date(),
+    });
+
+    return newMember;
+  }
+
+  /**
+   * Update role of an existing staff member
+   */
+  static async updateMemberRole(input: {
+    memberId: string;
+    newRole: Role;
+    performedBy: { id: string; name: string; role: Role };
+  }): Promise<StaffMember> {
+    const { memberId, newRole, performedBy } = input;
+    const member = mockStore.members.find((m) => m.id === memberId);
+    if (!member) {
+      throw new Error(`Member with ID "${memberId}" not found.`);
+    }
+
+    if (!canManageStaff(performedBy.role, newRole)) {
+      throw new Error(`Your role (${performedBy.role}) is not authorized to assign role "${newRole}".`);
+    }
+
+    const oldRole = member.role;
+    member.role = newRole;
+    member.updatedAt = new Date();
+
+    mockStore.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      entityType: 'BUSINESS_MEMBER',
+      entityId: memberId,
+      action: 'ROLE_CHANGE',
+      oldValues: { role: oldRole },
+      newValues: { role: newRole },
+      performedById: performedBy.id,
+      performedByName: performedBy.name,
+      performedByRole: performedBy.role,
+      createdAt: new Date(),
+    });
+
+    return member;
+  }
+
+  /**
+   * Remove a staff member from the business
+   */
+  static async removeMember(
+    memberId: string,
+    performedBy: { id: string; name: string; role: Role }
+  ): Promise<{ success: boolean; message: string }> {
+    const index = mockStore.members.findIndex((m) => m.id === memberId);
+    if (index === -1) {
+      throw new Error(`Member with ID "${memberId}" not found.`);
+    }
+
+    const member = mockStore.members[index];
+    if (member.role === 'OWNER') {
+      throw new Error('Cannot remove the business OWNER.');
+    }
+
+    if (!canManageStaff(performedBy.role, member.role)) {
+      throw new Error(`Your role (${performedBy.role}) cannot revoke access for role "${member.role}".`);
+    }
+
+    const [removed] = mockStore.members.splice(index, 1);
+
+    mockStore.auditLogs.unshift({
+      id: `aud_${Date.now()}`,
+      entityType: 'BUSINESS_MEMBER',
+      entityId: memberId,
+      action: 'DELETE',
+      oldValues: { name: removed.name, email: removed.email, role: removed.role },
+      performedById: performedBy.id,
+      performedByName: performedBy.name,
+      performedByRole: performedBy.role,
+      createdAt: new Date(),
+    });
+
+    return { success: true, message: `Access for ${removed.name} revoked.` };
+  }
+
+  /**
+   * Fetch immutable audit logs
+   */
+  static async getAuditLogs(options?: { bookId?: string; limit?: number }): Promise<AuditLogItem[]> {
+    const limit = options?.limit || 50;
+    return mockStore.auditLogs.slice(0, limit);
   }
 }

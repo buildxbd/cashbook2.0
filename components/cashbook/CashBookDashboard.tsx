@@ -6,15 +6,32 @@ import { BalanceSummaryHeader } from './BalanceSummaryHeader';
 import { FilterBar } from './FilterBar';
 import { TransactionList, TransactionRecord } from './TransactionList';
 import { AddTransactionModal } from './AddTransactionModal';
+import { EditTransactionModal } from './EditTransactionModal';
+import { StaffManagementModal } from './StaffManagementModal';
+import { AuditLogViewer } from './AuditLogViewer';
 import { BalanceSummary } from '@/lib/services/ledger-service';
-import { PaymentMode, TransactionType } from '@prisma/client';
-import { RefreshCw, Layers } from 'lucide-react';
+import { PaymentMode, TransactionType, Role } from '@prisma/client';
+import { DEMO_USERS, UserSession } from '@/lib/auth/permissions';
+import {
+  RefreshCw,
+  Layers,
+  Users,
+  History,
+  Shield,
+  Crown,
+  Briefcase,
+  Eye,
+  AlertCircle,
+} from 'lucide-react';
 
 interface CashBookDashboardProps {
   initialBookId?: string;
 }
 
 export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
+  // Current Active User (RBAC Simulation Context)
+  const [currentUser, setCurrentUser] = useState<UserSession>(DEMO_USERS[0]); // Default to Owner
+
   const [books, setBooks] = useState<BookItem[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<string>(initialBookId || '');
   const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
@@ -31,10 +48,14 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
   const [isLoadingBooks, setIsLoadingBooks] = useState(true);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [actionAlert, setActionAlert] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Modal State
+  // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [modalDefaultType, setModalDefaultType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE');
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<TransactionRecord | null>(null);
 
   // Filter States
   const [search, setSearch] = useState('');
@@ -42,7 +63,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
   const [paymentModeFilter, setPaymentModeFilter] = useState<'ALL' | PaymentMode>('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
 
-  // 1. Fetch Books
+  // Load Books
   const loadBooks = useCallback(async () => {
     try {
       setIsLoadingBooks(true);
@@ -61,7 +82,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     }
   }, [selectedBookId]);
 
-  // 2. Fetch Transactions & Balance Summary
+  // Load Transactions & Balance Summary
   const loadTransactions = useCallback(async () => {
     if (!selectedBookId) return;
     try {
@@ -98,7 +119,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     setIsRefreshing(false);
   };
 
-  // 3. Create Book
+  // Create Book
   const handleCreateBook = async (name: string, description: string) => {
     const res = await fetch('/api/books', {
       method: 'POST',
@@ -115,7 +136,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     }
   };
 
-  // 4. Create Transaction
+  // Create Transaction
   const handleCreateTransaction = async (txData: {
     type: TransactionType;
     paymentMode: PaymentMode;
@@ -132,6 +153,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
       body: JSON.stringify({
         ...txData,
         bookId: selectedBookId,
+        performedBy: currentUser,
       }),
     });
 
@@ -140,7 +162,60 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
       throw new Error(data.error || 'Failed to record transaction');
     }
 
-    // Refresh transactions
+    setActionAlert({ message: 'Transaction recorded and added to audit trail.', type: 'success' });
+    setTimeout(() => setActionAlert(null), 4000);
+    await loadTransactions();
+  };
+
+  // Update Transaction
+  const handleUpdateTransaction = async (updatedData: {
+    id: string;
+    amount: number;
+    category: string;
+    note?: string;
+    voucherUrl?: string;
+    locationGeo?: string;
+  }) => {
+    const res = await fetch('/api/transactions', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...updatedData,
+        performedBy: currentUser,
+      }),
+    });
+
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to update transaction');
+    }
+
+    setActionAlert({ message: `Transaction #${updatedData.id.slice(-6)} updated successfully.`, type: 'success' });
+    setTimeout(() => setActionAlert(null), 4000);
+    await loadTransactions();
+  };
+
+  // Delete Transaction
+  const handleDeleteTransaction = async (id: string) => {
+    const params = new URLSearchParams({
+      id,
+      role: currentUser.role,
+      userId: currentUser.id,
+      userName: currentUser.name,
+    });
+
+    const res = await fetch(`/api/transactions?${params.toString()}`, {
+      method: 'DELETE',
+    });
+
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.error || 'Failed to delete transaction');
+      return;
+    }
+
+    setActionAlert({ message: `Transaction #${id.slice(-6)} deleted and recorded to immutable audit log.`, type: 'success' });
+    setTimeout(() => setActionAlert(null), 4000);
     await loadTransactions();
   };
 
@@ -149,7 +224,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     setIsAddModalOpen(true);
   };
 
-  // Derive unique categories from current transactions
+  // Unique categories
   const categories = useMemo(() => {
     const set = new Set<string>();
     transactions.forEach((t) => {
@@ -158,7 +233,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     return Array.from(set);
   }, [transactions]);
 
-  // Client-side filtering
+  // Client filtering
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
       if (typeFilter !== 'ALL' && t.type !== typeFilter) return false;
@@ -175,7 +250,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     });
   }, [transactions, typeFilter, paymentModeFilter, categoryFilter, search]);
 
-  // Export to CSV
+  // CSV Export
   const handleExportCsv = () => {
     if (filteredTransactions.length === 0) return;
 
@@ -225,10 +300,24 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
 
   const currentBook = books.find((b) => b.id === selectedBookId);
 
+  const getRoleIcon = (role: Role) => {
+    switch (role) {
+      case 'OWNER':
+        return <Crown className="w-3.5 h-3.5 text-amber-400" />;
+      case 'FINANCE_MANAGER':
+        return <Shield className="w-3.5 h-3.5 text-emerald-400" />;
+      case 'DATA_OPERATOR':
+        return <Briefcase className="w-3.5 h-3.5 text-sky-400" />;
+      case 'VIEWER':
+      default:
+        return <Eye className="w-3.5 h-3.5 text-slate-400" />;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-16 selection:bg-emerald-500 selection:text-white">
-      {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
+      {/* Top Header */}
+      <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/20">
@@ -239,8 +328,8 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
                 <span className="font-extrabold text-base tracking-tight text-white">
                   CashBook <span className="text-emerald-400">2.0</span>
                 </span>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  BuildX Enterprise
+                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  RBAC & 24h Lock
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
@@ -249,7 +338,51 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* Right Header Navigation & Role Switcher */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* RBAC Simulation Switcher */}
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl p-1 text-xs">
+              <div className="flex items-center gap-1 px-1.5 py-0.5">
+                {getRoleIcon(currentUser.role)}
+                <span className="hidden md:inline font-semibold text-slate-300">Role:</span>
+              </div>
+              <select
+                value={currentUser.id}
+                onChange={(e) => {
+                  const found = DEMO_USERS.find((u) => u.id === e.target.value);
+                  if (found) setCurrentUser(found);
+                }}
+                className="bg-slate-950 text-slate-200 text-xs font-semibold rounded-lg px-2 py-1 border border-slate-800 focus:outline-none focus:border-emerald-500"
+              >
+                {DEMO_USERS.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name} ({user.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Staff & Roles Button */}
+            <button
+              onClick={() => setIsStaffModalOpen(true)}
+              title="Staff & Role Management"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
+            >
+              <Users className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden lg:inline">Staff</span>
+            </button>
+
+            {/* Audit Trail Button */}
+            <button
+              onClick={() => setIsAuditModalOpen(true)}
+              title="Immutable Audit Trail"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
+            >
+              <History className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden lg:inline">Audit</span>
+            </button>
+
+            {/* Book Selector */}
             <BookSelector
               books={books}
               selectedBookId={selectedBookId}
@@ -258,11 +391,12 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
               isLoading={isLoadingBooks}
             />
 
+            {/* Refresh */}
             <button
               onClick={handleRefresh}
               disabled={isRefreshing}
               title="Refresh ledger data"
-              className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
+              className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
             >
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
             </button>
@@ -270,22 +404,38 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
         </div>
       </header>
 
-      {/* Main Dashboard Content */}
+      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
-        {/* Ledger Header Title */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        {/* Action Alert Banner */}
+        {actionAlert && (
+          <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 rounded-xl flex items-center gap-2.5 text-xs animate-in fade-in duration-150">
+            <AlertCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{actionAlert.message}</span>
+          </div>
+        )}
+
+        {/* Ledger Header Title & Security Notice */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <h1 className="text-2xl font-black text-slate-100 tracking-tight">
                 {currentBook ? currentBook.name : 'Ledger Book'}
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
                 {transactions.length} entries
               </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                🔒 24h Compliance Lock Active
+              </span>
             </div>
             {currentBook?.description && (
               <p className="text-xs text-slate-400 mt-1">{currentBook.description}</p>
             )}
+          </div>
+
+          <div className="text-xs text-slate-400">
+            Acting as: <strong className="text-emerald-400">{currentUser.name}</strong> •{' '}
+            <span className="font-mono text-slate-300">[{currentUser.role}]</span>
           </div>
         </div>
 
@@ -293,6 +443,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
         <BalanceSummaryHeader
           summary={summary}
           onOpenAddModal={handleOpenAddModal}
+          currentUserRole={currentUser.role}
           currency="BDT"
         />
 
@@ -312,16 +463,19 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
           totalFilteredCount={filteredTransactions.length}
         />
 
-        {/* Transaction Table / List */}
+        {/* Transaction Table / List with Edit & Delete actions */}
         <TransactionList
           transactions={filteredTransactions}
           onOpenAddModal={handleOpenAddModal}
+          onEditTransaction={(tx) => setEditingTransaction(tx)}
+          onDeleteTransaction={handleDeleteTransaction}
+          currentUser={currentUser}
           currency="BDT"
           isLoading={isLoadingTransactions}
         />
       </main>
 
-      {/* Add Transaction Modal (Cash In / Cash Out) */}
+      {/* Add Transaction Modal */}
       <AddTransactionModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
@@ -329,6 +483,29 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
         defaultType={modalDefaultType}
         walletBalance={summary.virtualWalletBalance}
         dailyRemainingLimit={Math.max(0, summary.dailyLimit - summary.dailySpent)}
+      />
+
+      {/* Edit Transaction Modal */}
+      <EditTransactionModal
+        isOpen={!!editingTransaction}
+        onClose={() => setEditingTransaction(null)}
+        transaction={editingTransaction}
+        onSave={handleUpdateTransaction}
+        currentUser={currentUser}
+      />
+
+      {/* Staff Management Modal */}
+      <StaffManagementModal
+        isOpen={isStaffModalOpen}
+        onClose={() => setIsStaffModalOpen(false)}
+        currentUser={currentUser}
+      />
+
+      {/* Audit Log Viewer Modal */}
+      <AuditLogViewer
+        isOpen={isAuditModalOpen}
+        onClose={() => setIsAuditModalOpen(false)}
+        currentUser={currentUser}
       />
     </div>
   );
