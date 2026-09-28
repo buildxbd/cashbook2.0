@@ -9,6 +9,9 @@ import { AddTransactionModal } from './AddTransactionModal';
 import { EditTransactionModal } from './EditTransactionModal';
 import { StaffManagementModal } from './StaffManagementModal';
 import { AuditLogViewer } from './AuditLogViewer';
+import { VoucherGalleryModal } from './VoucherGalleryModal';
+import { PrintReceiptSlip } from './PrintReceiptSlip';
+import { ReportsExportView } from './ReportsExportView';
 import { BalanceSummary } from '@/lib/services/ledger-service';
 import { PaymentMode, TransactionType, Role } from '@prisma/client';
 import { DEMO_USERS, UserSession } from '@/lib/auth/permissions';
@@ -22,6 +25,9 @@ import {
   Briefcase,
   Eye,
   AlertCircle,
+  BarChart3,
+  Receipt,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 interface CashBookDashboardProps {
@@ -31,6 +37,9 @@ interface CashBookDashboardProps {
 export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
   // Current Active User (RBAC Simulation Context)
   const [currentUser, setCurrentUser] = useState<UserSession>(DEMO_USERS[0]); // Default to Owner
+
+  // Active View Tab: 'LEDGER' | 'REPORTS'
+  const [activeTab, setActiveTab] = useState<'LEDGER' | 'REPORTS'>('LEDGER');
 
   const [books, setBooks] = useState<BookItem[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<string>(initialBookId || '');
@@ -55,7 +64,9 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
   const [modalDefaultType, setModalDefaultType] = useState<'INCOME' | 'EXPENSE'>('EXPENSE');
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isVoucherGalleryOpen, setIsVoucherGalleryOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<TransactionRecord | null>(null);
+  const [printingTransaction, setPrintingTransaction] = useState<TransactionRecord | null>(null);
 
   // Filter States
   const [search, setSearch] = useState('');
@@ -250,6 +261,11 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     });
   }, [transactions, typeFilter, paymentModeFilter, categoryFilter, search]);
 
+  // Count vouchers
+  const voucherCount = useMemo(() => {
+    return transactions.filter((t) => t.voucherUrl && t.voucherUrl.trim().length > 0).length;
+  }, [transactions]);
+
   // CSV Export
   const handleExportCsv = () => {
     if (filteredTransactions.length === 0) return;
@@ -328,8 +344,8 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
                 <span className="font-extrabold text-base tracking-tight text-white">
                   CashBook <span className="text-emerald-400">2.0</span>
                 </span>
-                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  RBAC & 24h Lock
+                <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  BuildX Enterprise
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
@@ -338,29 +354,22 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
             </div>
           </div>
 
-          {/* Right Header Navigation & Role Switcher */}
-          <div className="flex items-center gap-2 sm:gap-3">
-            {/* RBAC Simulation Switcher */}
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl p-1 text-xs">
-              <div className="flex items-center gap-1 px-1.5 py-0.5">
-                {getRoleIcon(currentUser.role)}
-                <span className="hidden md:inline font-semibold text-slate-300">Role:</span>
-              </div>
-              <select
-                value={currentUser.id}
-                onChange={(e) => {
-                  const found = DEMO_USERS.find((u) => u.id === e.target.value);
-                  if (found) setCurrentUser(found);
-                }}
-                className="bg-slate-950 text-slate-200 text-xs font-semibold rounded-lg px-2 py-1 border border-slate-800 focus:outline-none focus:border-emerald-500"
-              >
-                {DEMO_USERS.map((user) => (
-                  <option key={user.id} value={user.id}>
-                    {user.name} ({user.role})
-                  </option>
-                ))}
-              </select>
-            </div>
+          {/* Right Header Navigation & Actions */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Vouchers Gallery Button */}
+            <button
+              onClick={() => setIsVoucherGalleryOpen(true)}
+              title="View Attached Receipt Vouchers"
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
+            >
+              <Receipt className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden lg:inline">Vouchers</span>
+              {voucherCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300">
+                  {voucherCount}
+                </span>
+              )}
+            </button>
 
             {/* Staff & Roles Button */}
             <button
@@ -381,6 +390,27 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
               <History className="w-3.5 h-3.5 text-emerald-400" />
               <span className="hidden lg:inline">Audit</span>
             </button>
+
+            {/* RBAC Role Switcher */}
+            <div className="flex items-center gap-1 bg-slate-900 border border-slate-700/80 rounded-xl p-1 text-xs">
+              <div className="flex items-center gap-1 px-1">
+                {getRoleIcon(currentUser.role)}
+              </div>
+              <select
+                value={currentUser.id}
+                onChange={(e) => {
+                  const found = DEMO_USERS.find((u) => u.id === e.target.value);
+                  if (found) setCurrentUser(found);
+                }}
+                className="bg-slate-950 text-slate-200 text-xs font-semibold rounded-lg px-2 py-1 border border-slate-800 focus:outline-none focus:border-emerald-500 max-w-[130px] sm:max-w-none truncate"
+              >
+                {DEMO_USERS.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name} ({user.role})
+                  </option>
+                ))}
+              </select>
+            </div>
 
             {/* Book Selector */}
             <BookSelector
@@ -414,65 +444,88 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
           </div>
         )}
 
-        {/* Ledger Header Title & Security Notice */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h1 className="text-2xl font-black text-slate-100 tracking-tight">
-                {currentBook ? currentBook.name : 'Ledger Book'}
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-                {transactions.length} entries
-              </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                🔒 24h Compliance Lock Active
-              </span>
-            </div>
-            {currentBook?.description && (
-              <p className="text-xs text-slate-400 mt-1">{currentBook.description}</p>
-            )}
+        {/* Navigation Tabs (Ledger Entries vs Reports & Analytics) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+          <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setActiveTab('LEDGER')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'LEDGER'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>CashBook Ledger</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('REPORTS')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'REPORTS'
+                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Reports & PDF/Excel Export</span>
+            </button>
           </div>
 
-          <div className="text-xs text-slate-400">
-            Acting as: <strong className="text-emerald-400">{currentUser.name}</strong> •{' '}
-            <span className="font-mono text-slate-300">[{currentUser.role}]</span>
+          <div className="text-xs text-slate-400 flex items-center gap-2">
+            <span>Operating as: <strong className="text-emerald-400">{currentUser.name}</strong></span>
+            <span className="font-mono text-slate-500">[{currentUser.role}]</span>
           </div>
         </div>
 
-        {/* Real-time Balance Summary & Action Buttons */}
-        <BalanceSummaryHeader
-          summary={summary}
-          onOpenAddModal={handleOpenAddModal}
-          currentUserRole={currentUser.role}
-          currency="BDT"
-        />
+        {/* Tab 1: Live Ledger Entries */}
+        {activeTab === 'LEDGER' ? (
+          <>
+            {/* Real-time Balance Summary & Action Buttons */}
+            <BalanceSummaryHeader
+              summary={summary}
+              onOpenAddModal={handleOpenAddModal}
+              currentUserRole={currentUser.role}
+              currency="BDT"
+            />
 
-        {/* Filter & Search Bar */}
-        <FilterBar
-          search={search}
-          onSearchChange={setSearch}
-          typeFilter={typeFilter}
-          onTypeFilterChange={setTypeFilter}
-          paymentModeFilter={paymentModeFilter}
-          onPaymentModeFilterChange={setPaymentModeFilter}
-          categoryFilter={categoryFilter}
-          onCategoryFilterChange={setCategoryFilter}
-          categories={categories}
-          onResetFilters={handleResetFilters}
-          onExportCsv={handleExportCsv}
-          totalFilteredCount={filteredTransactions.length}
-        />
+            {/* Filter & Search Bar */}
+            <FilterBar
+              search={search}
+              onSearchChange={setSearch}
+              typeFilter={typeFilter}
+              onTypeFilterChange={setTypeFilter}
+              paymentModeFilter={paymentModeFilter}
+              onPaymentModeFilterChange={setPaymentModeFilter}
+              categoryFilter={categoryFilter}
+              onCategoryFilterChange={setCategoryFilter}
+              categories={categories}
+              onResetFilters={handleResetFilters}
+              onExportCsv={handleExportCsv}
+              totalFilteredCount={filteredTransactions.length}
+            />
 
-        {/* Transaction Table / List with Edit & Delete actions */}
-        <TransactionList
-          transactions={filteredTransactions}
-          onOpenAddModal={handleOpenAddModal}
-          onEditTransaction={(tx) => setEditingTransaction(tx)}
-          onDeleteTransaction={handleDeleteTransaction}
-          currentUser={currentUser}
-          currency="BDT"
-          isLoading={isLoadingTransactions}
-        />
+            {/* Transaction Table / List */}
+            <TransactionList
+              transactions={filteredTransactions}
+              onOpenAddModal={handleOpenAddModal}
+              onEditTransaction={(tx) => setEditingTransaction(tx)}
+              onDeleteTransaction={handleDeleteTransaction}
+              onPrintSlip={(tx) => setPrintingTransaction(tx)}
+              currentUser={currentUser}
+              currency="BDT"
+              isLoading={isLoadingTransactions}
+            />
+          </>
+        ) : (
+          /* Tab 2: Reports & Analytics / PDF / Excel Exports */
+          <ReportsExportView
+            bookId={selectedBookId}
+            bookName={currentBook?.name || 'Ledger'}
+            onOpenVoucherGallery={() => setIsVoucherGalleryOpen(true)}
+            currency="BDT"
+          />
+        )}
       </main>
 
       {/* Add Transaction Modal */}
@@ -506,6 +559,23 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
         isOpen={isAuditModalOpen}
         onClose={() => setIsAuditModalOpen(false)}
         currentUser={currentUser}
+      />
+
+      {/* Voucher Gallery Lightbox Modal */}
+      <VoucherGalleryModal
+        isOpen={isVoucherGalleryOpen}
+        onClose={() => setIsVoucherGalleryOpen(false)}
+        transactions={transactions}
+        bookName={currentBook?.name || 'Current Ledger'}
+      />
+
+      {/* Print Receipt Memo Slip */}
+      <PrintReceiptSlip
+        isOpen={!!printingTransaction}
+        onClose={() => setPrintingTransaction(null)}
+        transaction={printingTransaction}
+        businessName="BuildX Technologies Ltd."
+        bookName={currentBook?.name || 'Main Cash Book'}
       />
     </div>
   );

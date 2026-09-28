@@ -17,6 +17,7 @@ import {
   Trash2,
   Clock,
   ShieldCheck,
+  Printer,
 } from 'lucide-react';
 import { PaymentMode, TransactionType, Role } from '@prisma/client';
 import { getTransactionLockInfo, canAddTransaction } from '@/lib/auth/permissions';
@@ -43,6 +44,7 @@ interface TransactionListProps {
   onOpenAddModal: (type: 'INCOME' | 'EXPENSE') => void;
   onEditTransaction?: (tx: TransactionRecord) => void;
   onDeleteTransaction?: (id: string) => void;
+  onPrintSlip?: (tx: TransactionRecord) => void;
   currentUser?: {
     id: string;
     name: string;
@@ -57,6 +59,7 @@ export function TransactionList({
   onOpenAddModal,
   onEditTransaction,
   onDeleteTransaction,
+  onPrintSlip,
   currentUser = { id: 'usr_owner_01', name: 'Tanvir Hossain', role: 'OWNER' },
   currency = 'BDT',
   isLoading = false,
@@ -296,8 +299,19 @@ export function TransactionList({
                   </div>
                 </div>
 
-                {/* RBAC Actions (Edit & Delete) */}
+                {/* RBAC Actions (Print Slip, Edit & Delete) */}
                 <div className="md:col-span-1 flex items-center justify-end gap-1 pt-1 md:pt-0">
+                  {/* Print Slip (Allowed for all roles) */}
+                  {onPrintSlip && (
+                    <button
+                      onClick={() => onPrintSlip(tx)}
+                      title="Print Voucher Memo Slip"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+
                   {isViewer ? (
                     <span className="text-[10px] text-slate-600 italic">Read-only</span>
                   ) : (

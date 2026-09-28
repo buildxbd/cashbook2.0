@@ -13,10 +13,13 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^1.48.0",
     "next": "14.2.35",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@cloudflare/next-on-pages": "^1.13.15",
