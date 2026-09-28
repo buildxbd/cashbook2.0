@@ -1,3 +1,10 @@
+import { setupDevPlatform } from '@cloudflare/next-on-pages/next-dev';
+
+// In development, setup Cloudflare Pages platform emulation
+if (process.env.NODE_ENV === 'development') {
+  await setupDevPlatform();
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

@@ -9,7 +9,8 @@
     "lint": "next lint",
     "pages:build": "npx @cloudflare/next-on-pages",
     "preview": "npm run pages:build && wrangler pages dev",
-    "deploy": "npm run pages:build && wrangler pages deploy"
+    "deploy": "npm run pages:build && wrangler pages deploy",
+    "postinstall": "node scripts/patch-next-on-pages.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -23,7 +24,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "@cloudflare/next-on-pages": "^1.13.15",
+    "@cloudflare/next-on-pages": "^1.13.16",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
