@@ -13,6 +13,8 @@ import {
   Wallet,
   Receipt,
   RotateCcw,
+  Database,
+  Building2,
 } from 'lucide-react';
 import {
   DateRangePreset,
@@ -133,6 +135,18 @@ export function ReportsExportView({
     });
   };
 
+  const handleExportTally = (format: 'xml' | 'csv') => {
+    if (!bookId) return;
+    const params = new URLSearchParams({
+      bookId,
+      format,
+      ...(customStart ? { startDate: customStart } : {}),
+      ...(customEnd ? { endDate: customEnd } : {}),
+      companyName: `${bookName} - CashBook`,
+    });
+    window.open(`/api/export/tally?${params.toString()}`, '_blank');
+  };
+
   const handleResetFilters = () => {
     setPreset('THIS_MONTH');
     setCustomStart('');
@@ -151,7 +165,7 @@ export function ReportsExportView({
               Advanced Reports & Statement Engine
             </h2>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-              Excel / PDF Ready
+              Excel / PDF / Tally Ready
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -167,6 +181,28 @@ export function ReportsExportView({
           >
             <Receipt className="w-3.5 h-3.5 text-emerald-400" />
             <span>Vouchers Gallery</span>
+          </button>
+
+          {/* Tally Prime XML Export */}
+          <button
+            onClick={() => handleExportTally('xml')}
+            disabled={!summary || summary.transactionCount === 0}
+            title="Download Tally Prime XML import file"
+            className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 disabled:opacity-40 rounded-xl text-xs font-semibold border border-amber-500/30 transition-colors"
+          >
+            <Building2 className="w-3.5 h-3.5 text-amber-400" />
+            <span>Tally Prime XML</span>
+          </button>
+
+          {/* ERP Accounting CSV Export */}
+          <button
+            onClick={() => handleExportTally('csv')}
+            disabled={!summary || summary.transactionCount === 0}
+            title="Download ERP-compatible double-entry accounting CSV"
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 disabled:opacity-40 rounded-xl text-xs font-semibold border border-indigo-500/30 transition-colors"
+          >
+            <Database className="w-3.5 h-3.5 text-indigo-400" />
+            <span>ERP CSV</span>
           </button>
 
           <button

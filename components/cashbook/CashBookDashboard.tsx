@@ -12,6 +12,9 @@ import { AuditLogViewer } from './AuditLogViewer';
 import { VoucherGalleryModal } from './VoucherGalleryModal';
 import { PrintReceiptSlip } from './PrintReceiptSlip';
 import { ReportsExportView } from './ReportsExportView';
+import { NetworkBanner, PendingQueueBadge } from '@/components/ui/NetworkBanner';
+import { PWAInstallPrompt } from '@/components/ui/PWAInstallPrompt';
+import { syncEngine } from '@/lib/offline/sync-engine';
 import { BalanceSummary } from '@/lib/services/ledger-service';
 import { PaymentMode, TransactionType, Role } from '@prisma/client';
 import { DEMO_USERS, UserSession } from '@/lib/auth/permissions';
@@ -103,16 +106,35 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
       const data = await res.json();
       if (data.success) {
         setTransactions(data.data || []);
+        // Cache to IndexedDB for offline access
+        if (Array.isArray(data.data)) {
+          syncEngine.cacheTransactions(data.data);
+        }
         if (data.summary) {
           setSummary(data.summary);
         }
       }
     } catch (err) {
-      console.error('Failed to load transactions:', err);
+      console.warn('Failed to load online transactions, attempting IndexedDB cache:', err);
+      // Fallback to IndexedDB cache
+      const cached = await syncEngine.getCachedTransactions(selectedBookId);
+      if (cached && cached.length > 0) {
+        setTransactions(cached as unknown as TransactionRecord[]);
+      }
     } finally {
       setIsLoadingTransactions(false);
     }
   }, [selectedBookId]);
+
+  // Subscribe to background sync completion to refresh state
+  useEffect(() => {
+    const unsubscribe = syncEngine.subscribe((syncStatus) => {
+      if (syncStatus.isOnline && !syncStatus.isSyncing && syncStatus.lastSyncedAt) {
+        loadTransactions();
+      }
+    });
+    return () => unsubscribe();
+  }, [loadTransactions]);
 
   useEffect(() => {
     loadBooks();
@@ -147,7 +169,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     }
   };
 
-  // Create Transaction
+  // Create Transaction (Offline-first with IndexedDB sync queue)
   const handleCreateTransaction = async (txData: {
     type: TransactionType;
     paymentMode: PaymentMode;
@@ -158,24 +180,82 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
     locationGeo?: string;
     transactionDate?: string;
   }) => {
-    const res = await fetch('/api/transactions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    // Check if offline
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const queueItem = await syncEngine.enqueueTransaction({
         ...txData,
         bookId: selectedBookId,
         performedBy: currentUser,
-      }),
-    });
+      });
 
-    const data = await res.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to record transaction');
+      const optimisticTx: TransactionRecord = {
+        id: queueItem.localId,
+        bookId: selectedBookId,
+        type: txData.type,
+        paymentMode: txData.paymentMode,
+        amount: txData.amount,
+        category: txData.category,
+        note: txData.note,
+        voucherUrl: txData.voucherUrl,
+        locationGeo: txData.locationGeo,
+        transactionDate: txData.transactionDate || new Date().toISOString(),
+        isLocked: false,
+        createdById: currentUser.id,
+      };
+
+      setTransactions((prev) => [optimisticTx, ...prev]);
+      setSummary((prev) => ({
+        ...prev,
+        totalIncome: txData.type === 'INCOME' ? prev.totalIncome + txData.amount : prev.totalIncome,
+        totalExpense: txData.type === 'EXPENSE' ? prev.totalExpense + txData.amount : prev.totalExpense,
+        netBalance: txData.type === 'INCOME' ? prev.netBalance + txData.amount : prev.netBalance - txData.amount,
+        transactionCount: prev.transactionCount + 1,
+      }));
+
+      setActionAlert({
+        message: '🔴 Offline Mode: Transaction saved locally in IndexedDB and will auto-sync when reconnected.',
+        type: 'success',
+      });
+      setTimeout(() => setActionAlert(null), 5000);
+      return;
     }
 
-    setActionAlert({ message: 'Transaction recorded and added to audit trail.', type: 'success' });
-    setTimeout(() => setActionAlert(null), 4000);
-    await loadTransactions();
+    try {
+      const res = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...txData,
+          bookId: selectedBookId,
+          performedBy: currentUser,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to record transaction');
+      }
+
+      setActionAlert({ message: 'Transaction recorded and added to audit trail.', type: 'success' });
+      setTimeout(() => setActionAlert(null), 4000);
+      await loadTransactions();
+    } catch (err) {
+      // If network failure occurred during request, enqueue offline
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await syncEngine.enqueueTransaction({
+          ...txData,
+          bookId: selectedBookId,
+          performedBy: currentUser,
+        });
+        setActionAlert({
+          message: 'Connection dropped. Transaction queued locally for auto-sync.',
+          type: 'success',
+        });
+        setTimeout(() => setActionAlert(null), 5000);
+        return;
+      }
+      throw err;
+    }
   };
 
   // Update Transaction
@@ -332,6 +412,9 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 pb-16 selection:bg-emerald-500 selection:text-white">
+      {/* Network Connectivity & Offline Queue Banner */}
+      <NetworkBanner />
+
       {/* Top Header */}
       <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
@@ -347,6 +430,7 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
                 <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   BuildX Enterprise
                 </span>
+                <PendingQueueBadge />
               </div>
               <p className="text-[11px] text-slate-400 hidden sm:block">
                 Multi-Ledger CashBook & UPI/MFS Native Expense Platform
@@ -577,6 +661,9 @@ export function CashBookDashboard({ initialBookId }: CashBookDashboardProps) {
         businessName="BuildX Technologies Ltd."
         bookName={currentBook?.name || 'Main Cash Book'}
       />
+
+      {/* PWA Standalone Install Prompt */}
+      <PWAInstallPrompt />
     </div>
   );
 }
