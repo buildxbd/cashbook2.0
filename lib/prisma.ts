@@ -1,4 +1,4 @@
-import { PrismaClient as PrismaClientNode } from '@prisma/client';
+import type { PrismaClient as PrismaClientNode } from '@prisma/client';
 
 type PrismaClientType = PrismaClientNode;
 
@@ -8,7 +8,7 @@ type PrismaClientType = PrismaClientNode;
  */
 function createPrismaClient(): PrismaClientType {
   if (process.env.NEXT_RUNTIME === 'edge') {
-    // Edge runtime (Cloudflare Pages / Workers)
+    // Edge runtime (Cloudflare Pages / Workers / Vercel Edge)
     // Uses @prisma/client/edge designed for Accelerate/Data Proxy/Hyperdrive
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { PrismaClient: PrismaClientEdge } = require('@prisma/client/edge');
@@ -18,7 +18,9 @@ function createPrismaClient(): PrismaClientType {
   }
 
   // Standard Node.js runtime (local dev server, standard SSR)
-  return new PrismaClientNode({
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { PrismaClient: PrismaClientNodeClass } = require('@prisma/client');
+  return new PrismaClientNodeClass({
     log:
       process.env.NODE_ENV === 'development'
         ? ['query', 'error', 'warn']
