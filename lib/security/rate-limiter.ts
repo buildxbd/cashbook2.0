@@ -6,16 +6,17 @@ interface RateLimitRecord {
 // In-memory sliding window rate-limiter store
 const rateLimitStore = new Map<string, RateLimitRecord>();
 
-// Clean up stale IP records every 5 minutes to prevent memory leaks
-if (typeof setInterval !== 'undefined') {
-  setInterval(() => {
-    const now = Date.now();
+let lastCleanup = Date.now();
+
+function cleanupStaleRecords(now: number) {
+  if (now - lastCleanup > 60000) {
+    lastCleanup = now;
     rateLimitStore.forEach((record, key) => {
       if (now > record.resetAt) {
         rateLimitStore.delete(key);
       }
     });
-  }, 5 * 60 * 1000);
+  }
 }
 
 /**
@@ -35,6 +36,7 @@ export function checkRateLimit(
   reset: number;
 } {
   const now = Date.now();
+  cleanupStaleRecords(now);
   const record = rateLimitStore.get(identifier);
 
   if (!record || now > record.resetAt) {

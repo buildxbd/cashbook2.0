@@ -3,6 +3,7 @@ import { LedgerService } from '@/lib/services/ledger-service';
 import { Role } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
 
 export async function GET(req: NextRequest) {
   try {

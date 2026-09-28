@@ -4,6 +4,7 @@ import { PaymentMode, TransactionType, Role } from '@prisma/client';
 import { canAddTransaction } from '@/lib/auth/permissions';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
 
 export async function GET(req: NextRequest) {
   try {

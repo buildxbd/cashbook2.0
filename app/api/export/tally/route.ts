@@ -3,6 +3,7 @@ import { LedgerService } from '@/lib/services/ledger-service';
 import { generateTallyPrimeXML, generateAccountingCSV } from '@/lib/erp/tally-transformer';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'edge';
 
 export async function GET(req: NextRequest) {
   try {
