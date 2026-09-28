@@ -36,9 +36,29 @@ export interface VpaVerificationResult {
   statusMessage?: string;
 }
 
+export interface WalletValidationParams {
+  walletId?: string;
+  amount: number;
+  type: 'INCOME' | 'EXPENSE';
+  currentBalance: number;
+  dailyLimit: number;
+  dailySpent: number;
+  monthlyLimit: number;
+  monthlySpent: number;
+}
+
+export interface WalletValidationResult {
+  valid: boolean;
+  reason?: string;
+  newBalance: number;
+  newDailySpent: number;
+  newMonthlySpent: number;
+}
+
 export interface PaymentAdapter {
   initiatePayment(request: UPIPaymentRequest): Promise<UPIPaymentResponse>;
   verifyVpa(vpa: string): Promise<VpaVerificationResult>;
   checkPaymentStatus(upiRefNumber: string): Promise<UPIPaymentResponse>;
+  verifyWalletBalanceAndLimits?(params: WalletValidationParams): WalletValidationResult;
   simulateWebhook?(payload: Record<string, unknown>): Promise<{ received: boolean }>;
 }

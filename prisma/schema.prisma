@@ -22,6 +22,8 @@ enum TransactionType {
 enum PaymentMode {
   CASH
   VIRTUAL_UPI
+  VIRTUAL_WALLET
+  BANK_TRANSFER
 }
 
 enum TransactionStatus {
@@ -60,7 +62,7 @@ model Business {
   legalName String?
   gstin     String?  @unique
   pan       String?
-  currency  String   @default("INR")
+  currency  String   @default("BDT")
   ownerId   String
   owner     User     @relation("BusinessOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   createdAt DateTime @default(now())

@@ -163,6 +163,81 @@ export class MockPaymentAdapter implements PaymentAdapter {
     console.info('[MockPaymentAdapter] Webhook received:', payload);
     return { received: true };
   }
+
+  /**
+   * Verifies employee virtual wallet balance and spend limits for expenses
+   */
+  verifyWalletBalanceAndLimits(params: {
+    walletId?: string;
+    amount: number;
+    type: 'INCOME' | 'EXPENSE';
+    currentBalance: number;
+    dailyLimit: number;
+    dailySpent: number;
+    monthlyLimit: number;
+    monthlySpent: number;
+  }) {
+    const { amount, type, currentBalance, dailyLimit, dailySpent, monthlyLimit, monthlySpent } = params;
+
+    if (amount <= 0) {
+      return {
+        valid: false,
+        reason: 'Invalid transaction amount: Amount must be greater than 0 BDT',
+        newBalance: currentBalance,
+        newDailySpent: dailySpent,
+        newMonthlySpent: monthlySpent,
+      };
+    }
+
+    if (type === 'INCOME') {
+      return {
+        valid: true,
+        newBalance: currentBalance + amount,
+        newDailySpent: dailySpent,
+        newMonthlySpent: monthlySpent,
+      };
+    }
+
+    // EXPENSE checks
+    if (amount > currentBalance) {
+      return {
+        valid: false,
+        reason: `Insufficient Virtual Wallet Balance: Available ৳${currentBalance.toLocaleString()}, Requested ৳${amount.toLocaleString()}`,
+        newBalance: currentBalance,
+        newDailySpent: dailySpent,
+        newMonthlySpent: monthlySpent,
+      };
+    }
+
+    if (dailySpent + amount > dailyLimit) {
+      const remainingDaily = Math.max(0, dailyLimit - dailySpent);
+      return {
+        valid: false,
+        reason: `Daily Spend Limit Exceeded: Remaining daily allowance is ৳${remainingDaily.toLocaleString()}, Requested ৳${amount.toLocaleString()} (Daily Cap: ৳${dailyLimit.toLocaleString()})`,
+        newBalance: currentBalance,
+        newDailySpent: dailySpent,
+        newMonthlySpent: monthlySpent,
+      };
+    }
+
+    if (monthlySpent + amount > monthlyLimit) {
+      const remainingMonthly = Math.max(0, monthlyLimit - monthlySpent);
+      return {
+        valid: false,
+        reason: `Monthly Spend Limit Exceeded: Remaining monthly allowance is ৳${remainingMonthly.toLocaleString()}, Requested ৳${amount.toLocaleString()} (Monthly Cap: ৳${monthlyLimit.toLocaleString()})`,
+        newBalance: currentBalance,
+        newDailySpent: dailySpent,
+        newMonthlySpent: monthlySpent,
+      };
+    }
+
+    return {
+      valid: true,
+      newBalance: currentBalance - amount,
+      newDailySpent: dailySpent + amount,
+      newMonthlySpent: monthlySpent + amount,
+    };
+  }
 }
 
 // Singleton instance
